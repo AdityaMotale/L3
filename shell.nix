@@ -7,5 +7,6 @@ pkgs.mkShell {
     pkgs.gcc.libc
     pkgs.gdb
     pkgs.glibc.static
+    pkgs.linuxPackages.perf
   ];
 }
