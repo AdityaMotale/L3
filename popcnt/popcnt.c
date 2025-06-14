@@ -41,8 +41,11 @@ uint32_t popcnt_v2(uint32_t x) {
   return x;
 }
 
+uint32_t popcnt_hw(uint32_t x) { return __builtin_popcount(x); }
+
 int main(void) {
   printf("POPCNT (v1) 24 -> %d\n", popcnt_v1(13));
-  printf("POPCNT (v1) 24 -> %d\n", popcnt_v2(13));
+  printf("POPCNT (v2) 24 -> %d\n", popcnt_v2(13));
+  printf("POPCNT (hw) 24 -> %d\n", popcnt_hw(13));
   return 0;
 }
