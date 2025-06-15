@@ -11,6 +11,7 @@ uint32_t popcnt_v1(uint32_t x) {
   return total;
 }
 
+// uses divide and conquer approach to be 5x faster then v1
 uint32_t popcnt_v2(uint32_t x) {
   // pair up bits w/ 2-bit sum
   uint32_t even = x & 0x55555555;
