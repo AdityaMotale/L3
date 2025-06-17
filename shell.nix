@@ -1,12 +1,17 @@
 with (import <nixpkgs> { });
 
 pkgs.mkShell {
-  buildInputs = [
-    pkgs.nasm
-    pkgs.gcc
-    pkgs.gcc.libc
-    pkgs.gdb
-    pkgs.glibc.static
-    pkgs.linuxPackages.perf
+  buildInputs = with pkgs; [
+    nasm
+    gcc
+    gcc.libc
+    gdb
+    glibc.static
+    linuxPackages.perf
+    rustc
+    cargo
+    rustfmt
+    rust-analyzer
+    clippy
   ];
 }
