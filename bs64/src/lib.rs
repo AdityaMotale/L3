@@ -1,3 +1,5 @@
+#![feature(portable_simd)]
+
 pub fn encode(input: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut output = String::new();
@@ -45,6 +47,25 @@ pub fn encode(input: &[u8]) -> String {
     }
 
     output
+}
+
+pub fn decode(input: &str) -> Option<Vec<u8>> {
+    const TABLE: [u8; 256] = {
+        let mut table = [255u8; 256];
+        let bytes = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+        let mut i = 0;
+
+        while i < bytes.len() {
+            table[bytes[i] as usize] = i as u8;
+            i += 1;
+        }
+
+        table
+    };
+
+    let len = input.len();
+    return None;
 }
 
 #[cfg(test)]
