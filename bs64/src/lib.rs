@@ -4,7 +4,7 @@ pub fn encode(input: &[u8]) -> String {
     let chunks = input.chunks_exact(3);
     let mut output = String::new();
 
-    for chunk in chunks {
+    fn encode_chunk(chunk: &[u8], output: &mut String) {
         let c = (chunk[0] as u32) << 16 | (chunk[1] as u32) << 8 | chunk[2] as u32;
 
         let b1 = ((c >> 18) & 0x3F) as usize;
@@ -18,7 +18,25 @@ pub fn encode(input: &[u8]) -> String {
         output.push(TABLE[b4] as char);
     }
 
-    println!("{:?}", output);
+    fn pad_to_3(chunk: &[u8]) -> [u8; 3] {
+        let mut c = [61u8; 3];
+
+        for (i, &b) in chunk.iter().enumerate() {
+            c[i] = b;
+        }
+
+        c
+    }
+
+    let remainder = chunks.remainder();
+
+    for chunk in chunks {
+        encode_chunk(chunk, &mut output);
+    }
+
+    let chunk = pad_to_3(remainder);
+
+    encode_chunk(&chunk, &mut output);
 
     output
 }
@@ -29,7 +47,6 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let _ = encode("My Sting".as_bytes());
-        assert_eq!(4, 4);
+        assert_eq!(String::from("TXkgU3RyaW5n"), encode("My String".as_bytes()));
     }
 }
