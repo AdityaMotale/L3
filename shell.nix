@@ -8,10 +8,5 @@ pkgs.mkShell {
     gdb
     glibc.static
     linuxPackages.perf
-    rustc
-    cargo
-    rustfmt
-    rust-analyzer
-    clippy
   ];
 }
