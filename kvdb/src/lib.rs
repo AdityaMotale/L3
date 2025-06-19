@@ -3,7 +3,7 @@ use std::{
     fs::{File, OpenOptions},
     io::{Seek, Write},
     os::unix::fs::FileExt,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use memmap::{MmapMut, MmapOptions};
@@ -143,18 +143,157 @@ impl ShardFile {
         Ok(None)
     }
 
-    pub fn set(&self, ph: PartedHash, k: &[u8], v: &[u8]) -> Result<bool> {
+    pub fn set(&self, ph: PartedHash, key: &[u8], val: &[u8]) -> Result<bool> {
         let row = self.header_row(ph.row());
+
+        for (i, s) in row.signs.iter().enumerate() {
+            if *s == ph.sign() {
+                let desc = row.descriptors[i];
+                let (k, _) = self.read(desc)?;
+
+                if k == key {
+                    row.descriptors[i] = self.write(key, val)?;
+                    return Ok(true);
+                }
+            }
+        }
+
+        for (i, s) in row.signs.iter_mut().enumerate() {
+            if *s == PartedHash::INVALID_SIGN {
+                *s = ph.sign();
+                row.descriptors[i] = self.write(key, val)?;
+                return Ok(true);
+            }
+        }
 
         Ok(false)
     }
+
+    pub fn remove(&mut self, ph: PartedHash, key: &[u8]) -> Result<bool> {
+        let row = self.header_row(ph.row());
+
+        for (i, s) in row.signs.iter_mut().enumerate() {
+            if *s == ph.sign() {
+                let desc = row.descriptors[i];
+                let (k, _) = self.read(desc)?;
+
+                if k == key {
+                    *s = PartedHash::INVALID_SIGN;
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = Result<KV>> + 'a {
+        (0..ROWS).map(|r| self.header_row(r)).flat_map(|row| {
+            row.signs.iter().enumerate().filter_map(|(i, sig)| {
+                if *sig == PartedHash::INVALID_SIGN {
+                    return None;
+                }
+                Some(self.read(row.descriptors[i]))
+            })
+        })
+    }
 }
 
-#[cfg(test)]
-mod tests {
+pub struct Store {
+    dirpath: PathBuf,
+    shards: Vec<ShardFile>,
+}
 
-    #[test]
-    fn it_works() {
-        assert_eq!(4, 4);
+impl Store {
+    const MAX_SHARD: u32 = u16::MAX as u32 + 1;
+
+    pub fn open(dir: impl AsRef<Path>) -> Result<Self> {
+        let dirpath = dir.as_ref().to_path_buf();
+        std::fs::create_dir_all(&dirpath)?;
+        let first_shard = ShardFile::open(&dirpath, 0, Self::MAX_SHARD)?;
+
+        Ok(Store {
+            dirpath,
+            shards: vec![first_shard],
+        })
+    }
+
+    pub fn get(&self, key: &[u8]) -> Result<Option<Buf>> {
+        let ph = PartedHash::new(key);
+
+        for shard in self.shards.iter() {
+            if ph.shard() < shard.end {
+                return shard.get(ph, key);
+            }
+        }
+
+        unreachable!()
+    }
+
+    pub fn remove(&mut self, key: &[u8]) -> Result<bool> {
+        let ph = PartedHash::new(key);
+
+        for shard in self.shards.iter_mut() {
+            if ph.shard() < shard.end {
+                return shard.remove(ph, key);
+            }
+        }
+
+        unreachable!()
+    }
+
+    pub fn split(&mut self, shard_idx: usize) -> Result<()> {
+        let removed_shard = self.shards.remove(shard_idx);
+
+        let start = removed_shard.start;
+        let end = removed_shard.end;
+        let mid = (start + end) / 2;
+        println!("splitting [{start}, {end}) to [{start}, {mid}) and [{mid}, {end})");
+
+        let top = ShardFile::open(&self.dirpath, start, mid)?;
+        let bottom = ShardFile::open(&self.dirpath, mid, end)?;
+
+        for res in removed_shard.iter() {
+            let (key, val) = res?;
+            let ph = PartedHash::new(&key);
+
+            if ph.shard() < mid {
+                bottom.set(ph, &key, &val)?;
+            } else {
+                top.set(ph, &key, &val)?;
+            }
+        }
+
+        std::fs::remove_file(self.dirpath.join(format!("{start}-{end}")))?;
+
+        self.shards.push(bottom);
+        self.shards.push(top);
+        self.shards.sort_by(|x, y| x.end.cmp(&y.end));
+
+        Ok(())
+    }
+
+    pub fn set(&mut self, key: &[u8], val: &[u8]) -> Result<bool> {
+        let ph = PartedHash::new(key);
+
+        loop {
+            let mut shard_to_split = None;
+
+            for (i, shard) in self.shards.iter_mut().enumerate() {
+                if ph.shard() < shard.end {
+                    if shard.set(ph, key, val)? {
+                        return Ok(true);
+                    }
+                    shard_to_split = Some(i);
+                    break;
+                }
+            }
+
+            self.split(shard_to_split.unwrap())?;
+        }
+    }
+
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = Result<KV>> + 'a {
+        self.shards.iter().flat_map(|shard| shard.iter())
     }
 }
