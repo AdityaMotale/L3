@@ -1,7 +1,8 @@
 use std::{
     cell::RefCell,
     fs::{File, OpenOptions},
-    io::Seek,
+    io::{Seek, Write},
+    os::unix::fs::FileExt,
     path::Path,
 };
 
@@ -94,6 +95,58 @@ impl ShardFile {
             file: RefCell::new(file),
             mmap,
         })
+    }
+
+    pub fn header_row(&self, r: usize) -> &mut ShardRow {
+        &mut unsafe { &mut *(self.mmap.as_ptr() as *const ShardHeader as *mut ShardHeader) }.rows[r]
+    }
+
+    pub fn read(&self, desc: Descriptor) -> Result<KV> {
+        let mut k = vec![0u8; desc.klen as usize];
+        let mut v = vec![0u8; desc.vlen as usize];
+        let f = self.file.borrow();
+
+        f.read_exact_at(&mut k, desc.offset as u64)?;
+        f.read_exact_at(&mut v, desc.offset as u64 + desc.klen as u64)?;
+
+        Ok((k, v))
+    }
+
+    pub fn write(&self, k: &[u8], v: &[u8]) -> Result<Descriptor> {
+        let mut f = self.file.borrow_mut();
+        let offset = f.stream_position()?;
+
+        f.write_all(k)?;
+        f.write_all(v)?;
+
+        Ok(Descriptor {
+            offset: offset as u32,
+            klen: k.len() as u16,
+            vlen: v.len() as u16,
+        })
+    }
+
+    pub fn get(&self, ph: PartedHash, key: &[u8]) -> Result<Option<Buf>> {
+        let row = self.header_row(ph.row());
+
+        for (i, s) in row.signs.iter().enumerate() {
+            if *s == ph.sign() {
+                let desc = row.descriptors[i];
+                let (k, v) = self.read(desc)?;
+
+                if k == key {
+                    return Ok(Some(v));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    pub fn set(&self, ph: PartedHash, k: &[u8], v: &[u8]) -> Result<bool> {
+        let row = self.header_row(ph.row());
+
+        Ok(false)
     }
 }
 
