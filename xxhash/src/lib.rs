@@ -1,14 +1,25 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+#![allow(dead_code)]
+
+mod xxhash32;
+
+pub(crate) trait IntoU32 {
+    fn into_u32(self) -> u32;
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl IntoU32 for u8 {
+    #[inline(always)]
+    fn into_u32(self) -> u32 {
+        self.into()
+    }
+}
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+pub(crate) trait IntoU64 {
+    fn into_u64(self) -> u64;
+}
+
+impl IntoU64 for u8 {
+    #[inline(always)]
+    fn into_u64(self) -> u64 {
+        self.into()
     }
 }
