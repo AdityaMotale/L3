@@ -197,3 +197,139 @@ mod buffer_tests {
         assert_eq!(buf.remaining().len(), 12);
     }
 }
+
+#[derive(Clone, PartialEq)]
+struct Accumulator(Lanes);
+
+impl Accumulator {
+    #[inline]
+    const fn new(seed: u32) -> Self {
+        Self([
+            seed.wrapping_add(PRIME32_1).wrapping_add(PRIME32_2),
+            seed.wrapping_add(PRIME32_2),
+            seed,
+            seed.wrapping_add(PRIME32_1),
+        ])
+    }
+
+    #[inline]
+    fn write(&mut self, lanes: Lanes) {
+        let [acc1, acc2, acc3, acc4] = &mut self.0;
+        let [l1, l2, l3, l4] = lanes;
+
+        *acc1 = Self::round(*acc1, l1.to_le());
+        *acc2 = Self::round(*acc2, l2.to_le());
+        *acc3 = Self::round(*acc3, l3.to_le());
+        *acc4 = Self::round(*acc4, l4.to_le());
+    }
+
+    #[inline]
+    fn write_many<'d>(&mut self, mut data: &'d [u8]) -> &'d [u8] {
+        while let Some((chunk, rest)) = data.split_first_chunk::<BYTES_IN_LINE>() {
+            let lanes = unsafe { chunk.as_ptr().cast::<Lanes>().read_unaligned() };
+            self.write(lanes);
+            data = rest;
+        }
+
+        data
+    }
+
+    #[inline]
+    const fn finish(&self) -> u32 {
+        let [acc1, acc2, acc3, acc4] = self.0;
+
+        let acc1 = acc1.rotate_left(1);
+        let acc2 = acc2.rotate_left(7);
+        let acc3 = acc3.rotate_left(12);
+        let acc4 = acc4.rotate_left(18);
+
+        acc1.wrapping_add(acc2)
+            .wrapping_add(acc3)
+            .wrapping_add(acc4)
+    }
+
+    #[inline]
+    const fn round(mut acc: u32, lane: u32) -> u32 {
+        acc = acc.wrapping_add(lane.wrapping_mul(PRIME32_2));
+        acc = acc.rotate_left(13);
+        acc.wrapping_mul(PRIME32_1)
+    }
+}
+
+impl std::fmt::Debug for Accumulator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let [acc1, acc2, acc3, acc4] = self.0;
+
+        f.debug_struct("Accumulator")
+            .field("acc1", &acc1)
+            .field("acc2", &acc2)
+            .field("acc3", &acc3)
+            .field("acc4", &acc4)
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod accumulator_tests {
+    use super::*;
+
+    #[test]
+    fn test_accumulator_new() {
+        let seed = 42;
+        let acc = Accumulator::new(seed);
+
+        assert_eq!(
+            acc.0[0],
+            seed.wrapping_add(PRIME32_1).wrapping_add(PRIME32_2)
+        );
+        assert_eq!(acc.0[1], seed.wrapping_add(PRIME32_2));
+        assert_eq!(acc.0[2], seed);
+        assert_eq!(acc.0[3], seed.wrapping_add(PRIME32_1));
+    }
+
+    #[test]
+    fn test_round_consistency() {
+        let acc = Accumulator::round(1, 2);
+        let mut exp = 1u32.wrapping_add(2u32.wrapping_mul(PRIME32_2));
+        exp = exp.rotate_left(13).wrapping_mul(PRIME32_1);
+
+        assert_eq!(acc, exp);
+    }
+
+    #[test]
+    fn test_write_and_finish() {
+        let mut acc = Accumulator::new(0);
+        acc.write([1, 2, 3, 4]);
+        let hash = acc.finish();
+
+        assert!(hash <= u32::MAX);
+    }
+
+    #[test]
+    fn test_write_many_exact_chunks() {
+        let mut acc = Accumulator::new(0);
+        let mut data = vec![];
+
+        for i in 0..32u8 {
+            data.push(i);
+        }
+
+        let rest = acc.write_many(&data);
+
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn test_write_many_with_remainder() {
+        let mut acc = Accumulator::new(0);
+        let mut data = vec![];
+
+        for i in 0..(BYTES_IN_LINE as u8 + 3) {
+            data.push(i);
+        }
+
+        let rest = acc.write_many(&data);
+
+        assert_eq!(rest.len(), 3);
+    }
+}
