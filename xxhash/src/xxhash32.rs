@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+use crate::{IntoU32, IntoU64};
+use std::hash::BuildHasher;
+
 const PRIME32_1: u32 = 0x9E3779B1;
 const PRIME32_2: u32 = 0x85EBCA77;
 const PRIME32_3: u32 = 0xC2B2AE3D;
@@ -13,7 +16,7 @@ type Bytes = [u8; 16];
 // compile time assertion to verify alignment
 const _: () = assert!(std::mem::size_of::<u8>() <= std::mem::size_of::<u32>());
 
-const BYTES_IN_LINE: usize = std::mem::size_of::<Bytes>();
+const BYTES_IN_LANE: usize = std::mem::size_of::<Bytes>();
 
 #[derive(Clone, PartialEq, Eq)]
 struct BufferedData(Lanes);
@@ -208,7 +211,7 @@ impl Accumulator {
             seed.wrapping_add(PRIME32_1).wrapping_add(PRIME32_2),
             seed.wrapping_add(PRIME32_2),
             seed,
-            seed.wrapping_add(PRIME32_1),
+            seed.wrapping_sub(PRIME32_1),
         ])
     }
 
@@ -225,7 +228,7 @@ impl Accumulator {
 
     #[inline]
     fn write_many<'d>(&mut self, mut data: &'d [u8]) -> &'d [u8] {
-        while let Some((chunk, rest)) = data.split_first_chunk::<BYTES_IN_LINE>() {
+        while let Some((chunk, rest)) = data.split_first_chunk::<BYTES_IN_LANE>() {
             let lanes = unsafe { chunk.as_ptr().cast::<Lanes>().read_unaligned() };
             self.write(lanes);
             data = rest;
@@ -284,7 +287,7 @@ mod accumulator_tests {
         );
         assert_eq!(acc.0[1], seed.wrapping_add(PRIME32_2));
         assert_eq!(acc.0[2], seed);
-        assert_eq!(acc.0[3], seed.wrapping_add(PRIME32_1));
+        assert_eq!(acc.0[3], seed.wrapping_sub(PRIME32_1));
     }
 
     #[test]
@@ -324,12 +327,157 @@ mod accumulator_tests {
         let mut acc = Accumulator::new(0);
         let mut data = vec![];
 
-        for i in 0..(BYTES_IN_LINE as u8 + 3) {
+        for i in 0..(BYTES_IN_LANE as u8 + 3) {
             data.push(i);
         }
 
         let rest = acc.write_many(&data);
 
         assert_eq!(rest.len(), 3);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hasher {
+    seed: u32,
+    length: u64,
+    accumulator: Accumulator,
+    buffer: Buffer,
+}
+
+impl Default for Hasher {
+    fn default() -> Self {
+        Self::with_seed(0)
+    }
+}
+
+impl Hasher {
+    /// Hash all data at once and get a 32-bit hash value
+    #[must_use]
+    #[inline]
+    pub fn oneshot(seed: u32, data: &[u8]) -> u32 {
+        let len = data.len().into_u64();
+
+        let mut accumulator = Accumulator::new(seed);
+        let data = accumulator.write_many(data);
+
+        Self::finish_with(seed, len, &accumulator, data)
+    }
+
+    /// Construct the hasher with initial seed
+    #[must_use]
+    pub const fn with_seed(seed: u32) -> Self {
+        Self {
+            seed,
+            length: 0,
+            accumulator: Accumulator::new(seed),
+            buffer: Buffer::new(),
+        }
+    }
+
+    /// The seed used to create this hasher
+    pub const fn seed(&self) -> u32 {
+        self.seed
+    }
+
+    /// The total no. of bytes hashed
+    pub const fn total_len(&self) -> u64 {
+        self.length
+    }
+
+    /// The total no. of bytes hashed, truncated to 32.
+    ///
+    /// For the full 64-bit count use [`total_len`](Self::total_len)
+    pub const fn total_len_32(&self) -> u32 {
+        self.length as u32
+    }
+
+    /// Returns the hash value for the input data so far.
+    #[must_use]
+    #[inline]
+    pub fn finish_32(&self) -> u32 {
+        Self::finish_with(
+            self.seed,
+            self.length,
+            &self.accumulator,
+            self.buffer.remaining(),
+        )
+    }
+
+    #[inline]
+    #[must_use]
+    fn finish_with(seed: u32, len: u64, accumulator: &Accumulator, mut data: &[u8]) -> u32 {
+        let mut acc = if len < BYTES_IN_LANE.into_u64() {
+            seed.wrapping_add(PRIME32_5)
+        } else {
+            accumulator.finish()
+        };
+
+        acc += len as u32;
+
+        while let Some((chunk, rest)) = data.split_first_chunk() {
+            let lane = u32::from_ne_bytes(*chunk).to_le();
+
+            acc = acc.wrapping_add(lane.wrapping_mul(PRIME32_3));
+            acc = acc.rotate_left(17).wrapping_mul(PRIME32_4);
+
+            data = rest;
+        }
+
+        for &byte in data {
+            let lane = byte.into_u32();
+
+            acc = acc.wrapping_add(lane.wrapping_mul(PRIME32_5));
+            acc = acc.rotate_left(11).wrapping_mul(PRIME32_1);
+        }
+
+        acc ^= acc >> 15;
+        acc = acc.wrapping_mul(PRIME32_2);
+        acc ^= acc >> 13;
+        acc = acc.wrapping_mul(PRIME32_3);
+        acc ^= acc >> 16;
+
+        acc
+    }
+}
+
+impl core::hash::Hasher for Hasher {
+    #[inline]
+    fn write(&mut self, data: &[u8]) {
+        let len = data.len().into_u64();
+
+        let (buf_lanes, data) = self.buffer.extend(data);
+
+        if let Some(&lanes) = buf_lanes {
+            self.accumulator.write(lanes);
+        }
+
+        let data = self.accumulator.write_many(data);
+
+        self.buffer.set(data);
+        self.length += len;
+    }
+
+    #[inline]
+    fn finish(&self) -> u64 {
+        Hasher::finish_32(self).into()
+    }
+}
+
+#[derive(Clone)]
+pub struct State(u32);
+
+impl State {
+    /// Constructs the hasher w/ an initial seed.
+    pub fn with_seed(seed: u32) -> Self {
+        Self(seed)
+    }
+}
+
+impl BuildHasher for State {
+    type Hasher = Hasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        Hasher::with_seed(self.0)
     }
 }
