@@ -481,3 +481,123 @@ impl BuildHasher for State {
         Hasher::with_seed(self.0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::{
+        array,
+        hash::{BuildHasherDefault, Hasher as _},
+    };
+    use std::collections::HashMap;
+
+    const _TRAITS: () = {
+        const fn is_clone<T: Clone>() {}
+        is_clone::<Hasher>();
+        is_clone::<State>();
+    };
+
+    const EMPTY_BYTES: [u8; 0] = [];
+
+    #[test]
+    fn ingesting_byte_by_byte_is_equivalent_to_large_chunks() {
+        let bytes = [0; 32];
+
+        let mut byte_by_byte = Hasher::with_seed(0);
+        for byte in bytes.chunks(1) {
+            byte_by_byte.write(byte);
+        }
+        let byte_by_byte = byte_by_byte.finish();
+
+        let mut one_chunk = Hasher::with_seed(0);
+        one_chunk.write(&bytes);
+        let one_chunk = one_chunk.finish();
+
+        assert_eq!(byte_by_byte, one_chunk);
+    }
+
+    #[test]
+    fn hash_of_nothing_matches_c_implementation() {
+        let mut hasher = Hasher::with_seed(0);
+        hasher.write(&EMPTY_BYTES);
+        assert_eq!(hasher.finish(), 0x02cc_5d05);
+    }
+
+    #[test]
+    fn hash_of_single_byte_matches_c_implementation() {
+        let mut hasher = Hasher::with_seed(0);
+        hasher.write(&[42]);
+        assert_eq!(hasher.finish(), 0xe0fe_705f);
+    }
+
+    #[test]
+    fn hash_of_multiple_bytes_matches_c_implementation() {
+        let mut hasher = Hasher::with_seed(0);
+        hasher.write(b"Hello, world!\0");
+        assert_eq!(hasher.finish(), 0x9e5e_7e93);
+    }
+
+    #[test]
+    fn hash_of_multiple_chunks_matches_c_implementation() {
+        let bytes: [u8; 100] = array::from_fn(|i| i as u8);
+        let mut hasher = Hasher::with_seed(0);
+        hasher.write(&bytes);
+        assert_eq!(hasher.finish(), 0x7f89_ba44);
+    }
+
+    #[test]
+    fn hash_with_different_seed_matches_c_implementation() {
+        let mut hasher = Hasher::with_seed(0x42c9_1977);
+        hasher.write(&EMPTY_BYTES);
+        assert_eq!(hasher.finish(), 0xd6bf_8459);
+    }
+
+    #[test]
+    fn hash_with_different_seed_and_multiple_chunks_matches_c_implementation() {
+        let bytes: [u8; 100] = array::from_fn(|i| i as u8);
+        let mut hasher = Hasher::with_seed(0x42c9_1977);
+        hasher.write(&bytes);
+        assert_eq!(hasher.finish(), 0x6d2f_6c17);
+    }
+
+    #[test]
+    fn hashes_with_different_offsets_are_the_same() {
+        let bytes = [0x7c; 4096];
+        let expected = Hasher::oneshot(0, &[0x7c; 64]);
+
+        let the_same = bytes
+            .windows(64)
+            .map(|w| {
+                let mut hasher = Hasher::with_seed(0);
+                hasher.write(w);
+                hasher.finish_32()
+            })
+            .all(|h| h == expected);
+        assert!(the_same);
+    }
+
+    #[ignore]
+    #[test]
+    fn length_overflows_32bit() {
+        // Hash 4.3 billion (4_300_000_000) bytes, which overflows a u32.
+        let bytes200: [u8; 200] = array::from_fn(|i| i as _);
+
+        let mut hasher = Hasher::with_seed(0);
+        for _ in 0..(4_300_000_000 / bytes200.len()) {
+            hasher.write(&bytes200);
+        }
+
+        assert_eq!(hasher.total_len(), 0x0000_0001_004c_cb00);
+        assert_eq!(hasher.total_len_32(), 0x004c_cb00);
+
+        // compared against the C implementation
+        assert_eq!(hasher.finish(), 0x1522_4ca7);
+    }
+
+    #[test]
+    fn can_be_used_in_a_hashmap_with_a_default_seed() {
+        let mut hash: HashMap<_, _, BuildHasherDefault<Hasher>> = Default::default();
+        hash.insert(42, "the answer");
+        assert_eq!(hash.get(&42), Some(&"the answer"));
+    }
+}
