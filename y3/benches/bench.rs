@@ -17,14 +17,14 @@ impl CriterionExt for Criterion {
 mod v1 {
     use super::*;
 
-    const NO_FILE: usize = 24;
-    const BYTES_SIZE: usize = 13695;
+    const NO_FILE: usize = 4;
+    const BYTES_SIZE: usize = 3864798;
 
     fn file_read(c: &mut Criterion) {
         let mut g = c.my_benchmark_group("y3", "file_read");
 
         for i in 0..NO_FILE {
-            let y3 = Y3::new("asm.txt");
+            let y3 = Y3::new("dict.txt");
             g.throughput(Throughput::Bytes(BYTES_SIZE as _));
 
             let id = format!("v1/iter-{i:02}");
