@@ -8,5 +8,6 @@ pkgs.mkShell {
     rustfmt
     rust-analyzer
     clippy
+    cargo-show-asm
   ];
 }
