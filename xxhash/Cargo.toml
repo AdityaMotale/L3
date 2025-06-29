@@ -4,3 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+
+[dev-dependencies]
+criterion = "0.6.0"
+rand = "0.9.1"
+
+[[bench]]
+name = "bench"
+path = "benches/bench.rs"
+harness = false

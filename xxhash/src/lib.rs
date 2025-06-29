@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
-mod xxhash32;
+pub mod xxhash32;
+pub use xxhash32::Hasher as XxHash32;
 
 pub(crate) trait IntoU32 {
     fn into_u32(self) -> u32;
