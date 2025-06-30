@@ -19,6 +19,12 @@ pub struct Y3 {
 }
 
 impl Y3 {
+    const LOWER: u8 = 0b000001;
+    const UPPER: u8 = 0b000010;
+    const DIGIT: u8 = 0b000100;
+    const INTERNAL: u8 = 0b001000; // e.g. '-', '\', '@', '.', '_', '+'
+    const DELIM: u8 = 0b010000; // whitespace
+
     pub fn new(path: &str) -> Self {
         Self {
             file: path.to_owned(),
@@ -64,51 +70,55 @@ impl Y3 {
     }
 
     fn process_chunks(&mut self, buf: &[u8]) {
-        let mut i = false;
-        let mut j = false;
+        enum State {
+            Outside,
+            InWord { has_lower: bool },
+        }
 
-        let mut t1: Vec<u8> = Vec::new();
-        let mut t2: Vec<u8> = Vec::new();
+        let mut state = State::Outside;
+        let mut token: Vec<u8> = Vec::new();
 
-        for &ch in buf.iter() {
-            // We got the valid character
-            if Self::is_ascii_alpha(ch) {
-                if j {
-                    t1.extend_from_slice(&t2);
+        for &ch in buf {
+            let cls = self.lookup[ch as usize];
 
-                    t2.clear();
-                    j = false;
+            match state {
+                // start a new token
+                State::Outside => {
+                    if cls & (Self::LOWER | Self::UPPER) != 0 {
+                        token.clear();
+                        token.push(ch);
+
+                        let has_lower = cls & Self::LOWER != 0;
+
+                        state = State::InWord { has_lower };
+                    }
                 }
+                State::InWord { mut has_lower } => {
+                    if cls & (Self::LOWER | Self::UPPER | Self::DIGIT | Self::INTERNAL) != 0 {
+                        token.push(ch);
 
-                t1.push(ch);
-                i = true;
+                        if cls & Self::LOWER != 0 {
+                            has_lower = true;
+                        }
 
-                continue;
-            }
+                        state = State::InWord { has_lower };
+                    } else {
+                        if has_lower {
+                            self.tokens.push(token);
+                            token = Vec::new();
+                        }
 
-            if self.lookup[ch as usize] == 1 {
-                if i {
-                    self.tokens.push(t1.clone());
-
-                    t1.clear();
-                    t2.clear();
+                        state = State::Outside;
+                    }
                 }
-
-                i = false;
-                j = false;
-            }
-
-            // we got invalid char (non alpha chars)
-            // only allowed if surrounded by valid chars
-            if i {
-                t2.push(ch);
-                j = true;
             }
         }
 
-        // consider remaining chars
-        if i {
-            self.tokens.push(t1.clone());
+        // flush on EOF
+        if let State::InWord { has_lower } = state {
+            if has_lower {
+                self.tokens.push(token);
+            }
         }
     }
 
@@ -116,10 +126,30 @@ impl Y3 {
     fn build_lookup() -> [u8; 256] {
         let mut t = [0u8; 256];
 
-        t[9] = 1; // \t
-        t[10] = 1; // \n
-        t[13] = 1; // \r
-        t[32] = 1; // SPACE
+        // small letters
+        for b in b'a'..=b'z' {
+            t[b as usize] |= Self::LOWER;
+        }
+
+        // big letters
+        for b in b'A'..=b'Z' {
+            t[b as usize] |= Self::UPPER;
+        }
+
+        // digits
+        for b in b'0'..=b'9' {
+            t[b as usize] |= Self::DIGIT;
+        }
+
+        // internal punctuation: allow common email/path chars
+        for &b in &[b'-', b'\'', b'@', b'.', b'_', b'+'] {
+            t[b as usize] |= Self::INTERNAL;
+        }
+
+        // delimiters
+        for &b in &[b' ', b'\n', b'\r', b'\t'] {
+            t[b as usize] |= Self::DELIM;
+        }
 
         t
     }
