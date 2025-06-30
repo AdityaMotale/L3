@@ -14,22 +14,27 @@ const LARGE_FILE_THRESHOLD: usize = 1 * 1024 * 1024; // 1 MiB
 
 pub struct Y3 {
     file: String,
+    tokens: Vec<Vec<u8>>,
+    lookup: [u8; 256],
 }
 
 impl Y3 {
     pub fn new(path: &str) -> Self {
         Self {
             file: path.to_owned(),
+            tokens: Vec::new(),
+            lookup: Self::build_lookup(),
         }
     }
 
-    pub fn tokenize(&self) -> std::io::Result<usize> {
+    pub fn tokenize(&mut self) -> std::io::Result<usize> {
         let metadata = std::fs::metadata(&self.file)?;
         let file_size = metadata.len() as usize;
 
         // Handle small files efficiently
         if file_size <= SMALL_FILE_THRESHOLD {
             let content = std::fs::read(&self.file)?;
+            self.process_chunks(&content);
 
             return Ok(content.len());
         }
@@ -53,10 +58,34 @@ impl Y3 {
                 break;
             }
 
+            self.process_chunks(&buffer);
             total_bytes += bytes_read;
         }
 
         Ok(total_bytes)
+    }
+
+    fn process_chunks(&mut self, buf: &[u8]) {
+        let mut j: usize = 0;
+
+        for (i, ch) in buf.iter().enumerate() {
+            if self.lookup[*ch as usize] == 1 {
+                self.tokens.push(buf[j..i].to_vec());
+
+                // we do not need to include the ith byte, it'll be a delimeter
+                j = i + 1;
+            }
+        }
+    }
+
+    fn build_lookup() -> [u8; 256] {
+        let mut t = [0u8; 256];
+
+        for &b in b" \t\r\n.,;:()[]{}<>\"'`" {
+            t[b as usize] = 1;
+        }
+
+        t
     }
 
     #[cfg(target_os = "linux")]
@@ -77,19 +106,21 @@ mod tests {
 
     #[test]
     fn test_large_file() {
-        let y3 = Y3::new("dict.txt");
+        let mut y3 = Y3::new("dict.txt");
 
         let n = y3.tokenize().unwrap();
 
         assert_eq!(n, 3864798);
+        assert_eq!(y3.tokens.len(), 370287);
     }
 
     #[test]
     fn test_small_file() {
-        let y3 = Y3::new("asm.txt");
+        let mut y3 = Y3::new("asm.txt");
 
         let n = y3.tokenize().unwrap();
 
         assert_eq!(n, 13703);
+        assert_eq!(y3.tokens.len(), 3492);
     }
 }
