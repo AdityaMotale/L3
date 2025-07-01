@@ -22,7 +22,7 @@ impl Y3 {
     const LOWER: u8 = 0b000001;
     const UPPER: u8 = 0b000010;
     const DIGIT: u8 = 0b000100;
-    const DELIM: u8 = 0b010000; // whitespaces, '_', '-', etc.
+    const DELIM: u8 = 0b001000; // whitespaces, '_', '-', etc.
 
     pub fn new(path: &str) -> Self {
         Self {
@@ -87,30 +87,45 @@ impl Y3 {
                 continue;
             }
 
-            // 2. Digit → ends current token (e.g. "token5" → "token")
+            // 2. Digit → ends current token *only* if not followed by a lowercase letter
             if cls & Self::DIGIT != 0 {
-                if in_token && saw_lower {
-                    self.tokens.push(buf[start..i].to_vec());
+                let next_is_lower = buf
+                    .get(i + 1)
+                    .map(|&b| self.lookup[b as usize] & Self::LOWER != 0)
+                    .unwrap_or(false);
+
+                if !next_is_lower {
+                    if in_token && saw_lower {
+                        self.tokens.push(buf[start..i].to_vec());
+                    }
+                    in_token = false;
+                    saw_lower = false;
+                    continue;
                 }
-                in_token = false;
-                saw_lower = false;
-                continue;
             }
 
+            // 3. Start new token
             if !in_token {
-                // New token
                 start = i;
                 in_token = true;
                 saw_lower = cls & Self::LOWER != 0;
             } else {
-                // Upper → Lower → split (e.g. PascalCase)
-                if last_cls & Self::UPPER != 0 && cls & Self::LOWER != 0 {
+                // Uppercase after lowercase → split (e.g., "FileIO" → "File")
+                if cls & Self::UPPER != 0 && saw_lower {
+                    self.tokens.push(buf[start..i].to_vec());
+                    start = i;
+                    saw_lower = false;
+                }
+                // PascalCase boundary: UPPER followed by LOWER (e.g., "IOFile")
+                else if last_cls & Self::UPPER != 0 && cls & Self::LOWER != 0 {
                     if saw_lower {
                         self.tokens.push(buf[start..i - 1].to_vec());
                     }
                     start = i - 1;
                     saw_lower = true;
-                } else if cls & Self::LOWER != 0 {
+                }
+                // mark saw_lower
+                else if cls & Self::LOWER != 0 {
                     saw_lower = true;
                 }
             }
@@ -187,11 +202,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_tiny_file() {
         let mut y3 = Y3::new("./ex_files/tiny.txt");
         let n = y3.tokenize().unwrap();
-        let expected_tokens = ["Contact", "Onno", "Hommes"];
+        let expected_tokens = ["Contact", "Onno", "Hommes", "ohommes", "cmu", "edu"];
 
         assert_ne!(n, 0);
         assert_ne!(y3.tokens.len(), 0);
@@ -275,7 +289,9 @@ mod tests {
     fn test_random_cases() {
         let mut y3 = Y3::new("./ex_files/rand_cases.txt");
         let n = y3.tokenize().unwrap();
-        let expected_tokens = ["ab", "Iab", "Name", "StateI", "file", "car", "ab5y", "Gpt"];
+        let expected_tokens = [
+            "Iab", "I2ab", "Iab", "Name", "State", "file", "car", "ab5y", "Gpt", "my", "Parser",
+        ];
 
         for t in y3.tokens.iter() {
             let token = String::from_utf8(t.clone()).unwrap();
