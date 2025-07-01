@@ -161,11 +161,6 @@ impl Y3 {
 
         debug_assert_eq!(res, 0, "`posix_fadvise` returned an error");
     }
-
-    #[inline]
-    fn is_ascii_alpha(c: u8) -> bool {
-        ((c & !0x20).wrapping_sub(b'A')) < 26
-    }
 }
 
 #[cfg(test)]
@@ -198,7 +193,15 @@ mod tests {
     fn test_tiny_file() {
         let mut y3 = Y3::new("tiny.txt");
         let n = y3.tokenize().unwrap();
-        let expected_tokens = ["Contact", "Onno", "Hommes", "ohommes@cmu.edu"];
+        let expected_tokens = [
+            "Contact",
+            "Onno",
+            "Hommes",
+            "ab",
+            "ab5y",
+            "ohommes@cmu.edu",
+            "Gpt",
+        ];
 
         assert_ne!(n, 0);
         assert_ne!(y3.tokens.len(), 0);
