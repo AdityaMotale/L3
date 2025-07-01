@@ -1,9 +1,0 @@
-_private 
-__priave_var 
-maxSize 
-methodName_expectedResult() 
-NullUser.getName() 
-IEnumerable 
-{"user_name": "Alice"} 
-$temp1 
-EMPLOYEE-RECORD

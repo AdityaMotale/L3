@@ -177,34 +177,24 @@ impl Y3 {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use super::*;
-
-    #[test]
-    #[ignore]
-    fn test_large_file() {
-        let mut y3 = Y3::new("./ex_files/large.txt");
-
-        let n = y3.tokenize().unwrap();
-
-        assert_ne!(n, 0);
-        assert_ne!(y3.tokens.len(), 0);
-    }
-
-    #[test]
-    #[ignore]
-    fn test_small_file() {
-        let mut y3 = Y3::new("./ex_files/small.txt");
-
-        let n = y3.tokenize().unwrap();
-
-        assert_ne!(n, 0);
-        assert_ne!(y3.tokens.len(), 0);
-    }
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_tiny_file() {
-        let mut y3 = Y3::new("./ex_files/tiny.txt");
+        let mut temp_file = NamedTempFile::new().unwrap();
+
+        temp_file
+            .write(b"# Contact: Onno Hommes EMAIL <ohommes@cmu.edu>.")
+            .unwrap();
+
+        let path = temp_file.path().to_path_buf();
+
+        let mut y3 = Y3::new(&path.to_str().unwrap());
         let n = y3.tokenize().unwrap();
+
         let expected_tokens = ["Contact", "Onno", "Hommes", "ohommes", "cmu", "edu"];
 
         assert_ne!(n, 0);
@@ -220,7 +210,17 @@ mod tests {
 
     #[test]
     fn test_various_cases() {
-        let mut y3 = Y3::new("./ex_files/cases.txt");
+        let mut temp_file = NamedTempFile::new().unwrap();
+
+        temp_file
+            .write(
+                b"camelCase PascalCase snake_case SCREAMING_SNAKE_CASE Camel_Snake_Case kebab-case UPPERCASE lowercase",
+            )
+            .unwrap();
+
+        let path = temp_file.path().to_path_buf();
+
+        let mut y3 = Y3::new(&path.to_str().unwrap());
         let n = y3.tokenize().unwrap();
         let expected_tokens = [
             "camel",
@@ -239,7 +239,6 @@ mod tests {
 
         assert_ne!(n, 0);
         assert_ne!(y3.tokens.len(), 0);
-
         assert_eq!(expected_tokens.len(), y3.tokens.len());
 
         for (i, t) in y3.tokens.iter().enumerate() {
@@ -251,11 +250,19 @@ mod tests {
 
     #[test]
     fn test_code_format_cases() {
-        let mut y3 = Y3::new("./ex_files/exp_cases.txt");
+        let mut temp_file = NamedTempFile::new().unwrap();
+
+        temp_file
+            .write(b"_private __private_var maxSize methodName_expectedResult() NullUser.getName() IEnumerable {\"user_name\": \"Alice\"} $temp1 EMPLOYEE-RECORD")
+            .unwrap();
+
+        let path = temp_file.path().to_path_buf();
+
+        let mut y3 = Y3::new(&path.to_str().unwrap());
         let n = y3.tokenize().unwrap();
         let expected_tokens = [
             "private",
-            "priave",
+            "private",
             "var",
             "max",
             "Size",
@@ -287,17 +294,19 @@ mod tests {
 
     #[test]
     fn test_random_cases() {
-        let mut y3 = Y3::new("./ex_files/rand_cases.txt");
+        let mut temp_file = NamedTempFile::new().unwrap();
+
+        temp_file
+            .write(b"#2 #A 123 IIab I2ab Iab IName StateI fileIO car5 ab5y CHATGpt myParser5X")
+            .unwrap();
+
+        let path = temp_file.path().to_path_buf();
+
+        let mut y3 = Y3::new(&path.to_str().unwrap());
         let n = y3.tokenize().unwrap();
         let expected_tokens = [
             "Iab", "I2ab", "Iab", "Name", "State", "file", "car", "ab5y", "Gpt", "my", "Parser",
         ];
-
-        for t in y3.tokens.iter() {
-            let token = String::from_utf8(t.clone()).unwrap();
-
-            println!("{token}");
-        }
 
         assert_ne!(n, 0);
         assert_ne!(y3.tokens.len(), 0);
