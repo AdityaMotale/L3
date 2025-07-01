@@ -23,6 +23,7 @@ impl Y3 {
     const UPPER: u8 = 0b000010;
     const DIGIT: u8 = 0b000100;
     const DELIM: u8 = 0b001000; // whitespaces, '_', '-', etc.
+    const EMAIL_CHAR: u8 = 0b010000; // '@' and '.'
 
     pub fn new(path: &str) -> Self {
         Self {
@@ -40,7 +41,6 @@ impl Y3 {
         if file_size <= SMALL_FILE_THRESHOLD {
             let content = std::fs::read(&self.file)?;
             self.process_chunks(&content);
-
             return Ok(content.len());
         }
 
@@ -56,12 +56,10 @@ impl Y3 {
 
         loop {
             let bytes_read = reader.read(&mut buffer)?;
-
             if bytes_read == 0 {
                 break;
             }
-
-            self.process_chunks(&buffer);
+            self.process_chunks(&buffer[..bytes_read]);
             total_bytes += bytes_read;
         }
 
@@ -73,9 +71,33 @@ impl Y3 {
         let mut in_token = false;
         let mut saw_lower = false;
         let mut last_cls = 0;
+        let mut in_email = false;
 
         for (i, &ch) in buf.iter().enumerate() {
             let cls = self.lookup[ch as usize];
+
+            // Check for email pattern
+            if ch == b'@' && in_token {
+                // Look ahead for domain pattern
+                if self.looks_like_email_domain(&buf[i..]) {
+                    in_email = true;
+                    continue;
+                }
+            }
+
+            // Skip tokenization if we're in an email
+            if in_email {
+                // End email on whitespace or end of valid email chars
+                if cls & (Self::LOWER | Self::UPPER | Self::DIGIT | Self::EMAIL_CHAR) == 0
+                    && ch != b'-'
+                    && ch != b'_'
+                {
+                    in_token = false;
+                    in_email = false;
+                    saw_lower = false;
+                }
+                continue;
+            }
 
             // 1. Non-alpha-numeric → always ends token
             if cls & (Self::LOWER | Self::UPPER | Self::DIGIT) == 0 {
@@ -87,7 +109,7 @@ impl Y3 {
                 continue;
             }
 
-            // 2. Digit → ends current token *only* if not followed by a lowercase letter
+            // 2. Digit → ends current token only if not followed by a lowercase letter
             if cls & Self::DIGIT != 0 {
                 let next_is_lower = buf
                     .get(i + 1)
@@ -134,9 +156,42 @@ impl Y3 {
         }
 
         // Final flush
-        if in_token && saw_lower {
+        if in_token && saw_lower && !in_email {
             self.tokens.push(buf[start..].to_vec());
         }
+    }
+
+    #[inline]
+    fn looks_like_email_domain(&self, buf: &[u8]) -> bool {
+        // Simple heuristic: @ followed by alphanumeric chars, then a dot, then more alphanumeric
+        let mut i = 1; // Skip the '@'
+        let mut found_dot = false;
+        let mut chars_after_dot = 0;
+
+        while i < buf.len() && i < 50 {
+            // Reasonable email length limit
+            let ch = buf[i];
+            let cls = self.lookup[ch as usize];
+
+            if ch == b'.' {
+                if found_dot || i == 1 {
+                    // Multiple dots or dot right after @
+                    return false;
+                }
+                found_dot = true;
+                chars_after_dot = 0;
+            } else if cls & (Self::LOWER | Self::UPPER | Self::DIGIT) != 0 || ch == b'-' {
+                if found_dot {
+                    chars_after_dot += 1;
+                }
+            } else {
+                // End of potential email
+                break;
+            }
+            i += 1;
+        }
+
+        found_dot && chars_after_dot >= 2 // At least 2 chars after dot (like ".com")
     }
 
     #[inline]
@@ -163,6 +218,11 @@ impl Y3 {
             t[b as usize] |= Self::DELIM;
         }
 
+        // email chars
+        for &b in &[b'@', b'.'] {
+            t[b as usize] |= Self::EMAIL_CHAR;
+        }
+
         t
     }
 
@@ -170,32 +230,28 @@ impl Y3 {
     #[inline]
     fn advise_sequential(file: &File) {
         let res = unsafe { posix_fadvise(file.as_raw_fd(), 0, 0, POSIX_FADV_SEQUENTIAL) };
-
         debug_assert_eq!(res, 0, "`posix_fadvise` returned an error");
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
-
     use super::*;
+    use std::io::Write;
     use tempfile::NamedTempFile;
 
     #[test]
     fn test_tiny_file() {
         let mut temp_file = NamedTempFile::new().unwrap();
-
         temp_file
             .write(b"# Contact: Onno Hommes EMAIL <ohommes@cmu.edu>.")
             .unwrap();
 
         let path = temp_file.path().to_path_buf();
-
         let mut y3 = Y3::new(&path.to_str().unwrap());
         let n = y3.tokenize().unwrap();
 
-        let expected_tokens = ["Contact", "Onno", "Hommes", "ohommes", "cmu", "edu"];
+        let expected_tokens = ["Contact", "Onno", "Hommes"];
 
         assert_ne!(n, 0);
         assert_ne!(y3.tokens.len(), 0);
@@ -203,7 +259,6 @@ mod tests {
 
         for (i, t) in y3.tokens.iter().enumerate() {
             let token = String::from_utf8(t.clone()).unwrap();
-
             assert_eq!(&token, expected_tokens[i]);
         }
     }
@@ -211,7 +266,6 @@ mod tests {
     #[test]
     fn test_various_cases() {
         let mut temp_file = NamedTempFile::new().unwrap();
-
         temp_file
             .write(
                 b"camelCase PascalCase snake_case SCREAMING_SNAKE_CASE Camel_Snake_Case kebab-case UPPERCASE lowercase",
@@ -219,9 +273,9 @@ mod tests {
             .unwrap();
 
         let path = temp_file.path().to_path_buf();
-
         let mut y3 = Y3::new(&path.to_str().unwrap());
         let n = y3.tokenize().unwrap();
+
         let expected_tokens = [
             "camel",
             "Case",
@@ -243,7 +297,6 @@ mod tests {
 
         for (i, t) in y3.tokens.iter().enumerate() {
             let token = String::from_utf8(t.clone()).unwrap();
-
             assert_eq!(&token, expected_tokens[i]);
         }
     }
@@ -251,15 +304,14 @@ mod tests {
     #[test]
     fn test_code_format_cases() {
         let mut temp_file = NamedTempFile::new().unwrap();
-
         temp_file
             .write(b"_private __private_var maxSize methodName_expectedResult() NullUser.getName() IEnumerable {\"user_name\": \"Alice\"} $temp1 EMPLOYEE-RECORD")
             .unwrap();
 
         let path = temp_file.path().to_path_buf();
-
         let mut y3 = Y3::new(&path.to_str().unwrap());
         let n = y3.tokenize().unwrap();
+
         let expected_tokens = [
             "private",
             "private",
@@ -287,7 +339,6 @@ mod tests {
 
         for (i, t) in y3.tokens.iter().enumerate() {
             let token = String::from_utf8(t.clone()).unwrap();
-
             assert_eq!(&token, expected_tokens[i]);
         }
     }
@@ -295,15 +346,14 @@ mod tests {
     #[test]
     fn test_random_cases() {
         let mut temp_file = NamedTempFile::new().unwrap();
-
         temp_file
             .write(b"#2 #A 123 IIab I2ab Iab IName StateI fileIO car5 ab5y CHATGpt myParser5X")
             .unwrap();
 
         let path = temp_file.path().to_path_buf();
-
         let mut y3 = Y3::new(&path.to_str().unwrap());
         let n = y3.tokenize().unwrap();
+
         let expected_tokens = [
             "Iab", "I2ab", "Iab", "Name", "State", "file", "car", "ab5y", "Gpt", "my", "Parser",
         ];
@@ -314,7 +364,31 @@ mod tests {
 
         for (i, t) in y3.tokens.iter().enumerate() {
             let token = String::from_utf8(t.clone()).unwrap();
+            assert_eq!(&token, expected_tokens[i]);
+        }
+    }
 
+    #[test]
+    fn test_email_detection() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file
+            .write(b"Contact john@example.com or name@domain.org for help with parseEmail function")
+            .unwrap();
+
+        let path = temp_file.path().to_path_buf();
+        let mut y3 = Y3::new(&path.to_str().unwrap());
+        let n = y3.tokenize().unwrap();
+
+        let expected_tokens = [
+            "Contact", "or", "for", "help", "with", "parse", "Email", "function",
+        ];
+
+        assert_ne!(n, 0);
+        assert_ne!(y3.tokens.len(), 0);
+        assert_eq!(expected_tokens.len(), y3.tokens.len());
+
+        for (i, t) in y3.tokens.iter().enumerate() {
+            let token = String::from_utf8(t.clone()).unwrap();
             assert_eq!(&token, expected_tokens[i]);
         }
     }
