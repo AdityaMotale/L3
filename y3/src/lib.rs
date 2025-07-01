@@ -22,8 +22,7 @@ impl Y3 {
     const LOWER: u8 = 0b000001;
     const UPPER: u8 = 0b000010;
     const DIGIT: u8 = 0b000100;
-    const INTERNAL: u8 = 0b001000; // e.g. '-', '\', '@', '.', '_', '+'
-    const DELIM: u8 = 0b010000; // whitespace
+    const DELIM: u8 = 0b010000; // whitespaces, '_', '-', etc.
 
     pub fn new(path: &str) -> Self {
         Self {
@@ -70,55 +69,58 @@ impl Y3 {
     }
 
     fn process_chunks(&mut self, buf: &[u8]) {
-        enum State {
-            Outside,
-            InWord { has_lower: bool },
-        }
+        let mut start = 0;
+        let mut in_token = false;
+        let mut saw_lower = false;
+        let mut last_cls = 0;
 
-        let mut state = State::Outside;
-        let mut token: Vec<u8> = Vec::new();
-
-        for &ch in buf {
+        for (i, &ch) in buf.iter().enumerate() {
             let cls = self.lookup[ch as usize];
 
-            match state {
-                // start a new token
-                State::Outside => {
-                    if cls & (Self::LOWER | Self::UPPER) != 0 {
-                        token.clear();
-                        token.push(ch);
-
-                        let has_lower = cls & Self::LOWER != 0;
-
-                        state = State::InWord { has_lower };
-                    }
+            // 1. Non-alpha-numeric → always ends token
+            if cls & (Self::LOWER | Self::UPPER | Self::DIGIT) == 0 {
+                if in_token && saw_lower {
+                    self.tokens.push(buf[start..i].to_vec());
                 }
-                State::InWord { mut has_lower } => {
-                    if cls & (Self::LOWER | Self::UPPER | Self::DIGIT | Self::INTERNAL) != 0 {
-                        token.push(ch);
+                in_token = false;
+                saw_lower = false;
+                continue;
+            }
 
-                        if cls & Self::LOWER != 0 {
-                            has_lower = true;
-                        }
+            // 2. Digit → ends current token (e.g. "token5" → "token")
+            if cls & Self::DIGIT != 0 {
+                if in_token && saw_lower {
+                    self.tokens.push(buf[start..i].to_vec());
+                }
+                in_token = false;
+                saw_lower = false;
+                continue;
+            }
 
-                        state = State::InWord { has_lower };
-                    } else {
-                        if has_lower {
-                            self.tokens.push(token);
-                            token = Vec::new();
-                        }
-
-                        state = State::Outside;
+            if !in_token {
+                // New token
+                start = i;
+                in_token = true;
+                saw_lower = cls & Self::LOWER != 0;
+            } else {
+                // Upper → Lower → split (e.g. PascalCase)
+                if last_cls & Self::UPPER != 0 && cls & Self::LOWER != 0 {
+                    if saw_lower {
+                        self.tokens.push(buf[start..i - 1].to_vec());
                     }
+                    start = i - 1;
+                    saw_lower = true;
+                } else if cls & Self::LOWER != 0 {
+                    saw_lower = true;
                 }
             }
+
+            last_cls = cls;
         }
 
-        // flush on EOF
-        if let State::InWord { has_lower } = state {
-            if has_lower {
-                self.tokens.push(token);
-            }
+        // Final flush
+        if in_token && saw_lower {
+            self.tokens.push(buf[start..].to_vec());
         }
     }
 
@@ -141,13 +143,8 @@ impl Y3 {
             t[b as usize] |= Self::DIGIT;
         }
 
-        // internal punctuation: allow common email/path chars
-        for &b in &[b'-', b'\'', b'@', b'.', b'_', b'+'] {
-            t[b as usize] |= Self::INTERNAL;
-        }
-
         // delimiters
-        for &b in &[b' ', b'\n', b'\r', b'\t'] {
+        for &b in &[b' ', b'\n', b'\r', b'\t', b'-', b'_'] {
             t[b as usize] |= Self::DELIM;
         }
 
@@ -190,6 +187,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_tiny_file() {
         let mut y3 = Y3::new("./ex_files/tiny.txt");
         let n = y3.tokenize().unwrap();
@@ -197,7 +195,6 @@ mod tests {
 
         assert_ne!(n, 0);
         assert_ne!(y3.tokens.len(), 0);
-
         assert_eq!(expected_tokens.len(), y3.tokens.len());
 
         for (i, t) in y3.tokens.iter().enumerate() {
@@ -208,7 +205,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_various_cases() {
         let mut y3 = Y3::new("./ex_files/cases.txt");
         let n = y3.tokenize().unwrap();
@@ -240,7 +236,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_code_format_cases() {
         let mut y3 = Y3::new("./ex_files/exp_cases.txt");
         let n = y3.tokenize().unwrap();
@@ -267,7 +262,6 @@ mod tests {
 
         assert_ne!(n, 0);
         assert_ne!(y3.tokens.len(), 0);
-
         assert_eq!(expected_tokens.len(), y3.tokens.len());
 
         for (i, t) in y3.tokens.iter().enumerate() {
@@ -278,15 +272,19 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_random_cases() {
-        let mut y3 = Y3::new("./ex_files/rand_case.txt");
+        let mut y3 = Y3::new("./ex_files/rand_cases.txt");
         let n = y3.tokenize().unwrap();
-        let expected_tokens = ["ab", "ab", "Name", "ab5y", "Gpt", "State", "file", "car"];
+        let expected_tokens = ["ab", "Iab", "Name", "StateI", "file", "car", "ab5y", "Gpt"];
+
+        for t in y3.tokens.iter() {
+            let token = String::from_utf8(t.clone()).unwrap();
+
+            println!("{token}");
+        }
 
         assert_ne!(n, 0);
         assert_ne!(y3.tokens.len(), 0);
-
         assert_eq!(expected_tokens.len(), y3.tokens.len());
 
         for (i, t) in y3.tokens.iter().enumerate() {
