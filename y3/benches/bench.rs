@@ -24,7 +24,7 @@ mod v1 {
         let mut g = c.my_benchmark_group("y3", "file_read");
 
         for i in 0..NO_FILE {
-            let mut y3 = Y3::new("dict.txt");
+            let mut y3 = Y3::new("./ex_files/large.txt");
             g.throughput(Throughput::Bytes(BYTES_SIZE as _));
 
             let id = format!("v1/iter-{i:02}");
