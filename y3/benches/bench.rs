@@ -17,17 +17,19 @@ impl CriterionExt for Criterion {
 mod v1 {
     use super::*;
 
-    const NO_FILE: usize = 2;
-    const BYTES_SIZE: usize = 3864798;
+    const FILES: [&str; 2] = ["large.txt", "e_large.txt"];
+    const SIZES: [usize; 2] = [3864798, 97447];
 
     fn file_read(c: &mut Criterion) {
-        let mut g = c.my_benchmark_group("y3", "file_read");
+        let mut g = c.my_benchmark_group("y3", "tokenization");
 
-        for i in 0..NO_FILE {
-            let mut y3 = Y3::new("./ex_files/large.txt");
-            g.throughput(Throughput::Bytes(BYTES_SIZE as _));
+        for (idx, &f) in FILES.iter().enumerate() {
+            let path = format!("./ex_files/{f}");
+            let mut y3 = Y3::new(&path);
+            let size = SIZES[idx];
+            let id = format!("iter-{size:08}-{f}");
 
-            let id = format!("v1/iter-{i:02}");
+            g.throughput(Throughput::Bytes(size as _));
             g.bench_function(id, |b| b.iter(|| y3.tokenize()));
         }
 
