@@ -513,4 +513,25 @@ mod tests {
             assert_eq!(&token, expected_tokens[i]);
         }
     }
+
+    #[test]
+    fn test_rust_code() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write(b"let token = Token::new();").unwrap();
+
+        let path = temp_file.path().to_path_buf();
+        let mut y3 = Y3::new(&path.to_str().unwrap());
+        let n = y3.tokenize().unwrap();
+
+        let expected_tokens = ["let", "token", "Token", "new"];
+
+        assert_ne!(n, 0);
+        assert_ne!(y3.tokens.len(), 0);
+        assert_eq!(expected_tokens.len(), y3.tokens.len());
+
+        for (i, t) in y3.tokens.iter().enumerate() {
+            let token = String::from_utf8(t.clone()).unwrap();
+            assert_eq!(&token, expected_tokens[i]);
+        }
+    }
 }
