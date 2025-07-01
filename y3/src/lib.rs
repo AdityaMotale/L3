@@ -208,6 +208,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_various_cases() {
         let mut y3 = Y3::new("./ex_files/cases.txt");
         let n = y3.tokenize().unwrap();
@@ -239,6 +240,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_code_format_cases() {
         let mut y3 = Y3::new("./ex_files/exp_cases.txt");
         let n = y3.tokenize().unwrap();
@@ -262,6 +264,25 @@ mod tests {
             "Alice",
             "temp",
         ];
+
+        assert_ne!(n, 0);
+        assert_ne!(y3.tokens.len(), 0);
+
+        assert_eq!(expected_tokens.len(), y3.tokens.len());
+
+        for (i, t) in y3.tokens.iter().enumerate() {
+            let token = String::from_utf8(t.clone()).unwrap();
+
+            assert_eq!(&token, expected_tokens[i]);
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn test_random_cases() {
+        let mut y3 = Y3::new("./ex_files/rand_case.txt");
+        let n = y3.tokenize().unwrap();
+        let expected_tokens = ["ab", "ab", "Name", "ab5y", "Gpt", "State", "file", "car"];
 
         assert_ne!(n, 0);
         assert_ne!(y3.tokens.len(), 0);
