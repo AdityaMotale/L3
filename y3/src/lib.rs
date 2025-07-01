@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-
 use std::{
     fs::File,
     io::{BufReader, Read},
@@ -24,6 +23,7 @@ impl Y3 {
     const DIGIT: u8 = 0b000100;
     const DELIM: u8 = 0b001000; // whitespaces, '_', '-', etc.
     const EMAIL_CHAR: u8 = 0b010000; // '@' and '.'
+    const URL_CHAR: u8 = 0b100000; // ':' and '/'
 
     pub fn new(path: &str) -> Self {
         Self {
@@ -72,12 +72,52 @@ impl Y3 {
         let mut saw_lower = false;
         let mut last_cls = 0;
         let mut in_email = false;
+        let mut in_url = false;
 
         for (i, &ch) in buf.iter().enumerate() {
             let cls = self.lookup[ch as usize];
 
+            // Check for URL pattern (protocol://)
+            if !in_url
+                && !in_email
+                && ch == b':'
+                && i + 2 < buf.len()
+                && buf[i + 1] == b'/'
+                && buf[i + 2] == b'/'
+            {
+                // Look back to see if we have a protocol
+                if self.looks_like_url_protocol(&buf[..i]) {
+                    in_url = true;
+                    in_token = false;
+                    saw_lower = false;
+                    continue;
+                }
+            }
+
+            // Skip tokenization if we're in a URL
+            if in_url {
+                // End URL on whitespace or other delimiters
+                if cls & Self::DELIM != 0
+                    || (ch != b'/'
+                        && ch != b':'
+                        && ch != b'.'
+                        && ch != b'-'
+                        && ch != b'_'
+                        && ch != b'?'
+                        && ch != b'&'
+                        && ch != b'='
+                        && ch != b'#'
+                        && ch != b'%'
+                        && cls & (Self::LOWER | Self::UPPER | Self::DIGIT) == 0)
+                {
+                    in_url = false;
+                    continue;
+                }
+                continue;
+            }
+
             // Check for email pattern
-            if ch == b'@' && in_token {
+            if ch == b'@' && in_token && !in_url {
                 // Look ahead for domain pattern
                 if self.looks_like_email_domain(&buf[i..]) {
                     in_email = true;
@@ -156,9 +196,37 @@ impl Y3 {
         }
 
         // Final flush
-        if in_token && saw_lower && !in_email {
+        if in_token && saw_lower && !in_email && !in_url {
             self.tokens.push(buf[start..].to_vec());
         }
+    }
+
+    #[inline]
+    fn looks_like_url_protocol(&self, buf: &[u8]) -> bool {
+        // Look backwards from current position to find start of potential protocol
+        let mut start = buf.len();
+
+        // Find the start of the current word (alphanumeric sequence)
+        while start > 0 {
+            let ch = buf[start - 1];
+            let cls = self.lookup[ch as usize];
+            if cls & (Self::LOWER | Self::UPPER | Self::DIGIT) == 0 {
+                break;
+            }
+            start -= 1;
+        }
+
+        if start >= buf.len() {
+            return false;
+        }
+
+        let protocol = &buf[start..];
+
+        // Check for common protocols
+        matches!(
+            protocol,
+            b"http" | b"https" | b"ftp" | b"ftps" | b"file" | b"mailto" | b"ssh" | b"git"
+        )
     }
 
     #[inline]
@@ -221,6 +289,11 @@ impl Y3 {
         // email chars
         for &b in &[b'@', b'.'] {
             t[b as usize] |= Self::EMAIL_CHAR;
+        }
+
+        // url chars
+        for &b in &[b':', b'/'] {
+            t[b as usize] |= Self::URL_CHAR;
         }
 
         t
@@ -382,6 +455,54 @@ mod tests {
         let expected_tokens = [
             "Contact", "or", "for", "help", "with", "parse", "Email", "function",
         ];
+
+        assert_ne!(n, 0);
+        assert_ne!(y3.tokens.len(), 0);
+        assert_eq!(expected_tokens.len(), y3.tokens.len());
+
+        for (i, t) in y3.tokens.iter().enumerate() {
+            let token = String::from_utf8(t.clone()).unwrap();
+            assert_eq!(&token, expected_tokens[i]);
+        }
+    }
+
+    #[test]
+    fn test_url_detection() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file
+            .write(b"Visit https://example.com or http://test.org for more info about parseUrl function")
+            .unwrap();
+
+        let path = temp_file.path().to_path_buf();
+        let mut y3 = Y3::new(&path.to_str().unwrap());
+        let n = y3.tokenize().unwrap();
+
+        let expected_tokens = [
+            "Visit", "or", "for", "more", "info", "about", "parse", "Url", "function",
+        ];
+
+        assert_ne!(n, 0);
+        assert_ne!(y3.tokens.len(), 0);
+        assert_eq!(expected_tokens.len(), y3.tokens.len());
+
+        for (i, t) in y3.tokens.iter().enumerate() {
+            let token = String::from_utf8(t.clone()).unwrap();
+            assert_eq!(&token, expected_tokens[i]);
+        }
+    }
+
+    #[test]
+    fn test_mixed_urls_and_emails() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file
+            .write(b"Contact support@company.com or visit https://company.com/help for urlHelper function")
+            .unwrap();
+
+        let path = temp_file.path().to_path_buf();
+        let mut y3 = Y3::new(&path.to_str().unwrap());
+        let n = y3.tokenize().unwrap();
+
+        let expected_tokens = ["Contact", "or", "visit", "for", "url", "Helper", "function"];
 
         assert_ne!(n, 0);
         assert_ne!(y3.tokens.len(), 0);
