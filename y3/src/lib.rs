@@ -170,7 +170,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_large_file() {
-        let mut y3 = Y3::new("dict.txt");
+        let mut y3 = Y3::new("./ex_files/large.txt");
 
         let n = y3.tokenize().unwrap();
 
@@ -181,7 +181,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_small_file() {
-        let mut y3 = Y3::new("asm.txt");
+        let mut y3 = Y3::new("./ex_files/small.txt");
 
         let n = y3.tokenize().unwrap();
 
@@ -191,16 +191,76 @@ mod tests {
 
     #[test]
     fn test_tiny_file() {
-        let mut y3 = Y3::new("tiny.txt");
+        let mut y3 = Y3::new("./ex_files/tiny.txt");
+        let n = y3.tokenize().unwrap();
+        let expected_tokens = ["Contact", "Onno", "Hommes"];
+
+        assert_ne!(n, 0);
+        assert_ne!(y3.tokens.len(), 0);
+
+        assert_eq!(expected_tokens.len(), y3.tokens.len());
+
+        for (i, t) in y3.tokens.iter().enumerate() {
+            let token = String::from_utf8(t.clone()).unwrap();
+
+            assert_eq!(&token, expected_tokens[i]);
+        }
+    }
+
+    #[test]
+    fn test_various_cases() {
+        let mut y3 = Y3::new("./ex_files/cases.txt");
         let n = y3.tokenize().unwrap();
         let expected_tokens = [
-            "Contact",
-            "Onno",
-            "Hommes",
-            "ab",
-            "ab5y",
-            "ohommes@cmu.edu",
-            "Gpt",
+            "camel",
+            "Case",
+            "Pascal",
+            "Case",
+            "snake",
+            "case",
+            "Camel",
+            "Snake",
+            "Case",
+            "kebab",
+            "case",
+            "lowercase",
+        ];
+
+        assert_ne!(n, 0);
+        assert_ne!(y3.tokens.len(), 0);
+
+        assert_eq!(expected_tokens.len(), y3.tokens.len());
+
+        for (i, t) in y3.tokens.iter().enumerate() {
+            let token = String::from_utf8(t.clone()).unwrap();
+
+            assert_eq!(&token, expected_tokens[i]);
+        }
+    }
+
+    #[test]
+    fn test_code_format_cases() {
+        let mut y3 = Y3::new("./ex_files/exp_cases.txt");
+        let n = y3.tokenize().unwrap();
+        let expected_tokens = [
+            "private",
+            "priave",
+            "var",
+            "max",
+            "Size",
+            "method",
+            "Name",
+            "expected",
+            "Result",
+            "Null",
+            "User",
+            "get",
+            "Name",
+            "Enumerable",
+            "user",
+            "name",
+            "Alice",
+            "temp",
         ];
 
         assert_ne!(n, 0);
