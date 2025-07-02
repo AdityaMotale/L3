@@ -1,14 +1,9 @@
 #![allow(dead_code)]
 
-use std::{
-    fs::File,
-    io::{self, Read},
-    path::PathBuf,
-};
-
 use memmap::Mmap;
+use std::{fs::File, io, path::PathBuf};
 
-const BUFFER_SIZE: usize = 1024 * 16; // 16 Kib
+const BUFFER_SIZE: usize = 1024 * 32; // 16 Kib
 
 enum SrcType {
     InMem(Vec<u8>),
@@ -23,24 +18,24 @@ pub struct SrcReader {
 
 impl SrcReader {
     pub fn new(path: PathBuf) -> io::Result<Self> {
-        let mut file = File::open(&path)?;
-        let file_size = file.metadata()?.len() as usize;
+        let metadata = std::fs::metadata(&path)?;
+        let file_size = metadata.len() as usize;
 
         if file_size <= BUFFER_SIZE {
-            let mut buf = Vec::with_capacity(file_size);
-            let size = file.read_to_end(&mut buf)?;
+            let buf = std::fs::read(path)?;
 
             Ok(Self {
                 src: SrcType::InMem(buf),
-                len: size,
+                len: file_size,
                 pos: 0,
             })
         } else {
+            let file = File::open(&path)?;
             let mmap = unsafe { Mmap::map(&file)? };
 
             Ok(Self {
-                len: mmap.len(),
                 src: SrcType::Mmap(mmap),
+                len: file_size,
                 pos: 0,
             })
         }
