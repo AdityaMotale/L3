@@ -84,33 +84,29 @@ impl Tokenizer {
         }
     }
 
-    pub fn tokenize(&self, path: &PathBuf) -> io::Result<Vec<Vec<u8>>> {
-        let mut tokens: Vec<Vec<u8>> = Vec::with_capacity(128);
+    pub fn tokenize(&self, path: &PathBuf) -> io::Result<Vec<u8>> {
+        const SPACE: u8 = b' ';
+        let mut tokens: Vec<u8> = Vec::with_capacity(BUFFER_SIZE * 2);
         let mut src_reader = SrcReader::new(&path)?;
-
-        let mut token: Vec<u8> = vec![0u8; 128];
-        let mut i: usize = 0;
+        let mut tok_len: u8 = 0;
 
         while let Some(buf) = src_reader.get_chunk() {
             for &ch in buf {
                 if self.lookup[ch as usize] & Self::DELIM != 0 {
-                    i = i & !((i == 1) as usize);
-                    let mask = (i != 0) as usize;
+                    if tok_len == 1 {
+                        tokens.pop();
 
-                    tokens.extend((0..mask).map(|_| token[0..i].to_vec()));
+                        continue;
+                    }
 
-                    i = 0;
+                    tokens.push(SPACE);
+                    tok_len = 0;
+
                     continue;
                 }
 
-                token[i] = ch;
-                i += 1;
-            }
-
-            if i != 0 {
-                tokens.push(token[0..i].to_vec());
-
-                i = 0;
+                tokens.push(ch);
+                tok_len += 1;
             }
         }
 
@@ -147,12 +143,21 @@ mod token_tests {
 
         let tokens = tokenizer.tokenize(&path).unwrap();
 
-        assert_eq!(tokens.len(), expected_tokens.len());
+        let mut token: Vec<u8> = Vec::new();
+        let mut idx: usize = 0;
 
-        for (i, t) in tokens.iter().enumerate() {
-            let token = String::from_utf8(t.clone()).unwrap();
+        for &t in tokens.iter() {
+            if t != b' ' {
+                token.push(t);
 
-            assert_eq!(&token, expected_tokens[i]);
+                continue;
+            }
+
+            let tok = String::from_utf8(token.clone()).unwrap();
+            assert_eq!(&tok, expected_tokens[idx]);
+
+            token.clear();
+            idx += 1;
         }
     }
 }
