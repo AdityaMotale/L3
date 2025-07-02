@@ -94,7 +94,10 @@ impl Tokenizer {
         while let Some(buf) = src_reader.get_chunk() {
             for &ch in buf {
                 if self.lookup[ch as usize] & Self::DELIM != 0 {
-                    tokens.push(token[0..i].to_vec());
+                    i = i & !((i == 1) as usize);
+                    let mask = (i != 0) as usize;
+
+                    tokens.extend((0..mask).map(|_| token[0..i].to_vec()));
 
                     i = 0;
                     continue;
@@ -138,7 +141,7 @@ mod token_tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         temp_file.write(b"# Contact Hommes EMAIL").unwrap();
 
-        let expected_tokens = ["#", "Contact", "Hommes", "EMAIL"];
+        let expected_tokens = ["Contact", "Hommes", "EMAIL"];
         let path = temp_file.path().to_path_buf();
         let tokenizer = Tokenizer::new();
 
