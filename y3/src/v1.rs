@@ -11,7 +11,7 @@ const BUFFER_SIZE: usize = 1024 * 64; // 32 Kib
 const SMALL_FILE_THRESHOLD: usize = 16 * 1024; // 16 KiB
 const LARGE_FILE_THRESHOLD: usize = 1 * 1024 * 1024; // 1 MiB
 
-pub struct Y3 {
+struct Y3 {
     file: String,
     tokens: Vec<Vec<u8>>,
     lookup: [u8; 256],
