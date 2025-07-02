@@ -37,7 +37,7 @@ mod src_reader {
             g.throughput(Throughput::Bytes(size as u64));
             g.bench_with_input(BenchmarkId::from_parameter(id), &path, |b, path| {
                 b.iter(|| {
-                    let mut sr = SrcReader::new(path.clone()).unwrap();
+                    let mut sr = SrcReader::new(&path).unwrap();
 
                     while let Some(chunk) = sr.get_chunk() {
                         black_box(chunk);
