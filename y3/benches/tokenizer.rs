@@ -33,9 +33,7 @@ fn file_read(c: &mut Criterion) {
         g.throughput(Throughput::Bytes(size as u64));
         g.bench_with_input(BenchmarkId::from_parameter(id), &path, |b, path| {
             b.iter(|| {
-                let tokenizer = Tokenizer::new();
-
-                let tokens = tokenizer.tokenize(path).unwrap();
+                let tokens = Tokenizer::tokenize(path).unwrap();
                 black_box(tokens);
             });
         });
