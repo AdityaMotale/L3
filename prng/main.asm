@@ -1,9 +1,10 @@
 bits 64
 default rel
 
-%define GOLDEN_RATIO 0x9E3779B97F4A7C15
-%define MULTIPLIER_ONE 0xBF58476D1CE4E5B9
-%define MULTIPLIER_TWO 0x94D049BB133111EB
+section .rodata
+        GOLDEN_RATIO: dq 0x9E3779B97F4A7C15
+        MULT_ONE: dq 0xBF58476D1CE4E5B9
+        MULT_TWO: dq 0x94D049BB133111EB
 
 section .bss
         time_val resq 2                     ; 16-bytes for `tval` struct
@@ -61,25 +62,28 @@ _start:
 ;   rsi - (preserved) pointer to buffer w/ 4 * 8 byte values written
 ;
 ; Clobbers:
-;   rax, rbx, rcx, rdx
+;   rax, rcx, rdx, r8
 function_split_mix_64:
         mov rax, rdi                        ; z = initial_seed
         mov rcx, 0x00                       ; loop counter (0)
 
 .seed_loop:
-        add rax, GOLDEN_RATIO               ; z += golden_ratio 
+        lea r8, [GOLDEN_RATIO]
+        add rax, [r8]                       ; z += golden_ratio 
 
         mov rdx, rax
         shr rdx, 0x1E                       ; shift right by 30 
         xor rax, rdx
 
-        imul rax, rax, MULTIPLIER_ONE
+        lea r8, [MULT_ONE]
+        imul rax, [r8]
 
         mov rdx, rax
         shr rdx, 0x1B                       ; shift right by 27
         xor rax, rdx
         
-        imul rax, rax, MULTIPLIER_TWO
+        lea r8, [MULT_TWO]
+        imul rax, [r8]
 
         mov rdx, rax
         shr rdx, 0x1F                       ; shift right by 31 
