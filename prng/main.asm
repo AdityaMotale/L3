@@ -9,7 +9,8 @@ section .rodata
 section .bss
         time_val resq 2                     ; 16-bytes for `tval` struct
         out_buf resb 22                     ; output buffer to print the ASCII u64 number
-        seeds resq 4                        ; four 64-bit slot for four sub-seeds
+        seeds resq 8                        ; eight 64-bit slot for eight sub-seeds
+        rns resq 4                          ; four 64-bit slot for generated random numbers
 
 section .text
         global _start
@@ -22,9 +23,16 @@ _start:
         lea rsi, [time_val]
         syscall
 
+        ; generate first 4 seeds
         mov rdi, [time_val + 8]             ; use nanoseconds
         lea rsi, [seeds]
         call function_split_mix_64
+
+        ; generate next 4 seeds,
+        ; here we use 3rd seed as the base seed
+        mov rdi, [seeds + 24]
+        lea rsi, [seeds + 32]
+        call function_split_mix_64 
 
         lea r12, [seeds]
         mov r13, 0x00                       ; loop counter (0)
@@ -43,7 +51,7 @@ _start:
 
         inc r13
 
-        cmp r13, 0x04
+        cmp r13, 0x08
         jl .print_loop
          
 .exit:        
@@ -51,6 +59,57 @@ _start:
         mov rax, 0x3C
         xor rdi, rdi
         syscall
+
+
+; Generate four random 64-bit numbers using AVX2 and eight 64-bit seeds
+;
+; Args:
+;   rdi - pointer to 32-bytes output buffer (4 * u64)
+;   rsi - pointer to 64-bytes seeds buffer (8 * u64 seeds)
+;
+; Returns:
+;   rax - `-1` on error, 0 otherwise 
+;
+; Clobbers:
+;   ymm0-ymm7, rax, rcx, rdx
+function_xoroshiro_128_plus:
+        ; load s0 & s1 (first four & last four)
+        vmovdqu ymm0, [rsi]                ; s0 lane
+        vmovdqu ymm1, [rsi + 32]           ; s1 lane 
+
+        ; result = s0 + s1
+        vpaddq ymm2, ymm0, ymm1
+        vmovdqu [rdi], ymm2                ; move 32 bytes (4 u64 nums) into out buf
+
+        vpxor ymm1, ymm1, ymm0             ; s1 ^= s0 (in-place)
+
+        ; temp_1 = rol(s0, 55), which is `(s0 << 55) | (s0 >> 9)`
+        vpsllq ymm3, ymm0, 55              ; ymm3 = s0 << 55
+        vpsrlq ymm4, ymm0, 9               ; ymm4 = s0 >> 9
+        vpor ymm5, ymm3, ymm2              ; ymm5 = rol(s0, 55)
+
+        ; temp_2 = s1 << 14
+        vpsllq ymm6, ymm1, 14
+
+        ; new s0 lane = `temp_1 ^ s1 ^ (s1 << 14)`
+        vpxor ymm5, ymm5, ymm1              ; ymm5 ^= s1
+        vpxor ymm5, ymm5, ymm6              ; ymm6 ^= (s1 << 14)
+
+        ; new s1 lane = `rol(s1, 36)`
+        vpsllq ymm6, ymm1, 36
+        vpsrlq ymm7, ymm1, 28               ; 64 - 36 = 28
+        vpor ymm1, ymm6, ymm7               ; ymm1 = rol(s1, 36)
+
+        ; store back new state
+        vmovdqu [rsi], ymm5
+        vmovdqu [rsi + 32], ymm1
+
+        ; avoid SSE transition penalty
+        vzeroupper
+        
+        xor rax, rax
+        ret
+
 
 ; Generate four independent 64-bit "sub-seeds" based on input seed
 ;
