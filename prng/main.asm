@@ -24,7 +24,7 @@ _start:
         syscall
 
         ; generate first 4 seeds
-        mov rdi, [time_val + 8]             ; use nanoseconds
+        mov rdi, [time_val + 8]             ; use nanoseconds as initial seed
         lea rsi, [seeds]
         call function_split_mix_64
 
@@ -34,7 +34,11 @@ _start:
         lea rsi, [seeds + 32]
         call function_split_mix_64 
 
-        lea r12, [seeds]
+        lea rsi, [seeds]
+        lea rdi, [rns]
+        call function_xoroshiro_128_plus
+
+        lea r12, [rns]
         mov r13, 0x00                       ; loop counter (0)
 
 .print_loop:
@@ -51,7 +55,7 @@ _start:
 
         inc r13
 
-        cmp r13, 0x08
+        cmp r13, 0x04
         jl .print_loop
          
 .exit:        
